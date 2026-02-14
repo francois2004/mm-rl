@@ -7,11 +7,19 @@ __pycache__/
 .venv/
 venv/
 
-# Data & artifacts
-data/
-models/
-logs/
+# Data & artifacts (on ignore tout sauf .gitkeep)
+data/*
+!data/**/.gitkeep
+
+models/*
+!models/**/.gitkeep
+
+logs/*
+!logs/**/.gitkeep
+
 runs/
+wandb/
+mlruns/
 
 # OS / editors
 .DS_Store
