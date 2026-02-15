@@ -14,8 +14,9 @@ class Qlearning_agent :
     
     def select_actions(self, s_idx): 
         u = np.random.uniform(0,1)
-
-        if u < self.epsilon:
+        if self.epsilon == 0: 
+            a_idx = np.argmax(self.Q[s_idx, :])
+        elif u < self.epsilon:
             a_idx = np.random.randint(0, len(self.actions))
         else : 
             a_idx = np.argmax(self.Q[s_idx,:])

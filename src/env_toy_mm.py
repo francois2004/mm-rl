@@ -3,7 +3,7 @@ import pandas as pd
 
 class MMSimulator : 
 
-    def __init__(self, csv_path, seed = 42, p_fill_base = .30, eta_inv = .01, inv_max = 50, inv_min = -50):
+    def __init__(self, csv_path, seed = 42, p_fill_base = .30, eta_inv = .00001, inv_max = 50, inv_min = -50):
         self.data = pd.read_csv(csv_path)
         self.rng = np.random.default_rng(seed)
 
@@ -20,6 +20,9 @@ class MMSimulator :
         self.cash = .0
         self.prev_mtm = .0
         self.nb_trades = 0
+        self.penalty_sum = 0.0
+        self.inventory_path = []
+        self.nb_trades = 0
         return self._state()
     
     def reset_random(self, T_max = 50): 
@@ -27,6 +30,9 @@ class MMSimulator :
         self.inventory = 0
         self.cash = .0
         self.prev_mtm = .0
+        self.nb_trades = 0
+        self.penalty_sum = 0.0
+        self.inventory_path = []
         self.nb_trades = 0
         return self._state()
     
@@ -71,7 +77,8 @@ class MMSimulator :
 
         inv_penalty = self.eta_inv * self.inventory**2
         reward = reward - inv_penalty
-
+        self.penalty_sum += inv_penalty
+        self.inventory_path.append(self.inventory)
         self.prev_mtm = mtm
 
         return self._state(), float(reward),done

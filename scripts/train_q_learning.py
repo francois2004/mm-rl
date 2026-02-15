@@ -3,8 +3,8 @@ from src.utils.discretisation import state_index
 from src.agents.q_learning import Qlearning_agent
 import numpy as np
 
-env = MMSimulator("data/raw/toy_lob.csv", p_fill_base = .30, eta_inv = .0001)
-n_states = 55
+env = MMSimulator("data/raw/toy_lob.csv", p_fill_base = .30, eta_inv = 1e-6)
+n_states = 65
 actions = [.0005, .001, .0015, .002, .003, .004, .005]
 n_action = len(actions)
 agent = Qlearning_agent(
@@ -14,8 +14,8 @@ agent = Qlearning_agent(
     gamma = .99,
     epsilon = 1.
 )
-nb_episode = 300
-T_max = 50
+nb_episode = 200
+T_max = 200
 avg_reward = 0
 for episode in range (nb_episode): 
 
@@ -37,18 +37,21 @@ for episode in range (nb_episode):
         total_reward += reward
         i+=1
         avg_reward+=reward
-    agent.epsilon = np.maximum(agent.epsilon * .99, .05)
-    # if episode%10 ==0:
+    agent.epsilon = np.maximum(agent.epsilon * .995, .05)
+    if episode%50 ==0:
     #     #last_state = env._state()
     #     #mid_last = last_state[0]
     #     #mtm_final = env.cash + env.inventory * mid_last
     #     #total_trades = env.nb_trades
     #     #print ("episode: ",episode, "total reward: " , total_reward, "inventory: ", env.inventory, "cash: ", env.cash)
     #     #print("last mid: ", mid_last, "mtm final: ", mtm_final, "total_trades: ", total_trades)
-    #     mean_abs_Q = np.mean(np.abs(agent.Q))
-    #     n_visited_states = len(visited)
-    #     print("epsilon: ", agent.epsilon, "mean abs Q: ", mean_abs_Q, "n_visited_states: ", n_visited_states, "average reward last ten occurences: ", avg_reward/10)
+         mean_abs_Q = np.mean(np.abs(agent.Q))
+         n_visited_states = len(visited)
+         print("episode: ", episode)
+         print("epsilon: ", agent.epsilon, "mean abs Q: ", mean_abs_Q, "n_visited_states: ", n_visited_states, "average reward last ten occurences: ", avg_reward/10)
     #     avg_reward = 0
+
+
 np.save("models/q_table.npy", agent.Q)
 
 
