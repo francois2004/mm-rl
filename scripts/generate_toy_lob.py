@@ -3,7 +3,7 @@ import pandas as pd
 
 np.random.seed(42)
 
-N = 200
+N = 10000
 dt = 1/254
 
 mu = 0. ##
