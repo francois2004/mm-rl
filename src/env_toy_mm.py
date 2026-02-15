@@ -3,7 +3,7 @@ import pandas as pd
 
 class MMSimulator : 
 
-    def __init__(self, csv_path, seed = 42, p_fill_base = .30, eta_inv = .01, inv_max = 100, inv_min = -100):
+    def __init__(self, csv_path, seed = 42, p_fill_base = .30, eta_inv = .01, inv_max = 50, inv_min = -50):
         self.data = pd.read_csv(csv_path)
         self.rng = np.random.default_rng(seed)
 
@@ -19,6 +19,15 @@ class MMSimulator :
         self.inventory = 0
         self.cash = .0
         self.prev_mtm = .0
+        self.nb_trades = 0
+        return self._state()
+    
+    def reset_random(self, T_max = 50): 
+        self.t = self.rng.integers(0, len(self.data)-T_max -1)
+        self.inventory = 0
+        self.cash = .0
+        self.prev_mtm = .0
+        self.nb_trades = 0
         return self._state()
     
     def _state(self):
@@ -40,15 +49,17 @@ class MMSimulator :
 
         p = self.p_fill_base * np.exp(-k * float(delta))
         p = float(np.clip(p, 0.0, 1.0))
-        
-        if self.inventory < self.inv_max : 
-            if self.rng.random() < p/2 : 
+        u = self.rng.random()
+        if self.inventory > self.inv_min: 
+            if u < p/2 : 
                 self.inventory -=1
                 self.cash+= p_ask
-        if self.inventory > self.inv_min: 
-            if (p/2 <= self.rng.random()< p)   : 
+                self.nb_trades+=1
+        if self.inventory < self.inv_max : 
+            if (p/2 <= u< p)   : 
                 self.inventory +=1
                 self.cash -= p_bid
+                self.nb_trades += 1
 
         self.t +=1
         done = (self.t >= len(self.data)-1)
