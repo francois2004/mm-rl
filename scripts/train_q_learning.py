@@ -14,7 +14,7 @@ agent = Qlearning_agent(
     gamma = .99,
     epsilon = 1.
 )
-nb_episode = 200
+nb_episode = 600
 T_max = 200
 avg_reward = 0
 for episode in range (nb_episode): 
