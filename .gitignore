@@ -1,37 +1,27 @@
 # Python
 __pycache__/
-*.pyc
-.ipynb_checkpoints/
+*.py[cod]
 
-# Environnements
+# Virtual environments
 .venv/
 venv/
+env/
+mm-rl/
+mm-rl-backup/
 
-# Data & artifacts (on ignore tout sauf .gitkeep)
-data/*
-!data/**/.gitkeep
+# Jupyter
+.ipynb_checkpoints/
 
-models/*
-!models/**/.gitkeep
-
-logs/*
-!logs/**/.gitkeep
-
-runs/
-wandb/
-mlruns/
-
-# OS / editors
-.DS_Store
-.vscode/
-.venv/
-__pycache__/
-*.pyc
-results/
-
-# fichiers intermediaires latex
+# LaTeX
 *.aux
 *.log
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+*.out
+*.toc
+
+# Artifacts
+logs/
+data/processed/
+models/
