@@ -28,3 +28,10 @@ mlruns/
 __pycache__/
 *.pyc
 results/
+
+# fichiers intermediaires latex
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz

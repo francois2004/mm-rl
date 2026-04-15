@@ -33,3 +33,5 @@ class Qlearning_agent :
         self.Q[s_idx, a_idx] = current + self.alpha *(target - current)
 
 
+
+

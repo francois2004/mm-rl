@@ -1,0 +1,147 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+\geometry{margin=2.5cm}
+
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.5em}{}
+
+\title{\textbf{Carnet de Suivi --- Projet de Market Making par Reinforcement Learning}}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Note méthodologique}
+
+Le présent carnet de suivi a été initié tardivement dans le déroulement du projet.
+
+Les premières phases de travail ont consisté en une exploration progressive des concepts (simulation de marché, définition d'états, premières implémentations), sans tenue systématique d'un journal formalisé.
+
+Plutôt que de reconstruire artificiellement une chronologie précise, nous adoptons ici une démarche en deux temps :
+\begin{itemize}
+    \item une synthèse structurée des éléments déjà établis,
+    \item puis un suivi rigoureux à partir de la phase actuelle du projet, centrée sur l'implémentation de l'algorithme PPO.
+\end{itemize}
+
+\textbf{Ce choix vise à privilégier la cohérence intellectuelle plutôt qu'une reconstruction chronologique artificielle.}
+
+\section{Synthèse des travaux préliminaires}
+
+\subsection{Objectif}
+
+Le projet vise à développer une stratégie de market making à l'aide du reinforcement learning, dans un environnement simulé reproduisant certaines propriétés stylisées des marchés financiers.
+
+\subsection{Modélisation}
+
+Le problème est formulé comme un MDP :
+
+\[
+(S, A, P, R)
+\]
+
+avec :
+\begin{itemize}
+    \item un état basé sur des variables agrégées (micro-price, imbalance, RSI, inventaire),
+    \item une action continue représentant les quotes bid/ask,
+    \item une récompense fondée sur le PnL pénalisé par le risque d'inventaire.
+\end{itemize}
+
+\subsection{Simulateur}
+
+Un environnement simplifié a été développé :
+\begin{itemize}
+    \item dynamique du mid-price et du spread,
+    \item probabilités de fill dépendant des quotes,
+    \item gestion de l'inventaire.
+\end{itemize}
+
+\textbf{Remarque critique :}  
+Cette phase a principalement consisté en une construction expérimentale visant à rendre le problème manipulable, au prix d'hypothèses simplificatrices fortes.
+
+\section{Début du suivi formalisé}
+
+\subsection*{Entrée du 13 avril 2026 --- Définition de l'architecture PPO}
+
+\textbf{Objectif :}  
+Initier l'implémentation d'une méthode Actor-Critic basée sur PPO.
+
+\textbf{Décisions prises :}
+\begin{itemize}
+    \item Adoption d'une politique continue paramétrée par un réseau de neurones
+    \item Utilisation d'une distribution gaussienne suivie d'une transformation $\tanh$
+    \item Séparation Actor / Critic
+\end{itemize}
+
+\textbf{Analyse :}  
+Lors du passage a une politique d'actions continue, le papier n'indiquait pas de quelle manière se définissait cette loi. 
+Nous avons alors choisi une politique suivant une loi log-normale pour conserver la positivité des actions et une certaine simplicité. 
+
+\subsection*{Entrée du 14 avril 2026 --- Implémentation de l'Actor}
+
+\textbf{Objectif :}  
+Structurer le réseau Actor (\texttt{ActorNet}) et définir la fonction de sampling.
+
+\textbf{Travail réalisé :}
+\begin{itemize}
+    \item Définition d'un réseau fully-connected avec activations \texttt{tanh}
+    \item Paramétrisation d'une loi gaussienne sur un espace latent
+    \item Transformation via $\tanh$ pour contraindre l'action
+\end{itemize}
+
+\textbf{Question centrale :}  
+Quel est le rôle exact de la fonction \texttt{sample\_action} ?
+
+\textbf{Clarification :}
+Cette fonction doit :
+\begin{itemize}
+    \item échantillonner une action selon la politique $\pi_\theta$
+    \item retourner la log-probabilité associée
+    \item éventuellement retourner l'action non transformée (pré-$\tanh$)
+\end{itemize}
+
+\textbf{Importance :}  
+Ces éléments sont nécessaires pour calculer le ratio PPO :
+
+\[
+r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}
+\]
+
+\subsection*{Entrée du 14 Avril 2026 --- Définition de la perte de l'acteur}
+On aborde la définition de la fonction de perte associée a la politique. Contrairement au critic, la cible n'est pas clairement identifiée, car il n'existe pas de "bonne action" connue a priori. 
+
+On introduit alors un signal d'apprentissage, 
+\textbf{L'Avantage} calculé comme suit
+\[
+A_t = G_t - V(s_t)
+\]
+où 
+\begin{itemize}
+    \item $G_t$ représente le gain observé ici
+    \item $V(s_t)$ correspond au gain attendu sous la politique actuelle
+\end{itemize}
+L'avantage mesure donc a posteriori la qualité d'une action, et nous nous servons de ce signal pour ajuster la politique
+\[
+\log\pi_\theta (a_t|s_t)\cdot A_t
+\]
+Ainsi, les actions ayant un avantage positif sont renforcées, tandis que celles ayant un avantage négatif sont pénalisées.
+
+On définit alors la perte de l'acteur comme 
+\[
+L_{actor} = -\mathbb{E}[\log\pi_\theta (a_t|s_t)\cdot A_t]
+\]
+Cette perte est implémentée dans le module Loss. 
+
+\section*{Entrée du 15 avril 2026 : Premiere implémentation de la loss d'acteur, implémentation de la boucle d'apprentissage}
+La perte est calculée comme une simple moyenne pondérée avec les avantages, sans bonus d'entropie. 
+
+On met en place une première boucle d'apprentissage locale pour l'acteur, réévalue la politique courante sur les actions et entraine sur la perte précédemment définie. 
+\end{document}
