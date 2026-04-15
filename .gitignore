@@ -25,3 +25,4 @@ mm-rl-backup/
 logs/
 data/processed/
 models/
+logs/
