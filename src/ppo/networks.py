@@ -27,6 +27,8 @@ class ActorNet(nn.Module) :
         delta_max: float = 0.05,
         log_std_min: float = -5.0,
         log_std_max: float = 2.0,
+        q_min = .0, 
+        q_max = 10.
     ):
         super().__init__()
 
@@ -45,6 +47,8 @@ class ActorNet(nn.Module) :
         self.delta_max = float(delta_max)
         self.log_std_min = float(log_std_min)
         self.log_std_max = float(log_std_max)
+        self.q_min = q_min
+        self.q_max = q_max
 
         layers = [nn.Linear(state_dim, hidden_size), nn.Tanh()]
         for _ in range(n_layers - 1):
@@ -124,10 +128,20 @@ class ActorNet(nn.Module) :
         delta : tensor (batch, action_dim)
             Action transformée dans [delta_min, delta_max]
         """
-        u = torch.tanh(z)
-        a01 = (u+1)/2
-        delta = self.delta_min + (self.delta_max - self.delta_min) * a01
-        return delta
+        u = torch.tanh(z)              # (-1, 1)
+        a01 = (u + 1.0) / 2.0          # (0, 1)
+
+        # Séparation des composantes
+        delta_bid = self.delta_min + (self.delta_max - self.delta_min) * a01[..., 0:1]
+        delta_ask = self.delta_min + (self.delta_max - self.delta_min) * a01[..., 1:2]
+
+        q_bid = self.q_min + (self.q_max - self.q_min) * a01[..., 2:3]
+        q_ask = self.q_min + (self.q_max - self.q_min) * a01[..., 3:4]
+
+        # Reconcatène
+        action = torch.cat([delta_bid, delta_ask, q_bid, q_ask], dim=-1)
+
+        return action
     
 
     def sample_action(self, state : torch.Tensor): 

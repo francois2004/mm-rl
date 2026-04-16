@@ -49,7 +49,8 @@ class MMSimulator :
     inv_max=50,
     inv_min=-50,
     phi_as=0.02,
-    state_mode="simple",  # <-- nouveau
+    state_mode="simple", 
+    dynamic_mode = "baseline"
 ):
         """
     Simulateur de market making sur données LOB.
@@ -64,6 +65,7 @@ class MMSimulator :
         raw = pd.read_csv(csv_path)
 
         self.state_mode = state_mode
+        self.dynamics_mode = dynamic_mode
 
         if state_mode == "simple":
             self.data = raw.copy()
@@ -196,44 +198,28 @@ class MMSimulator :
         dtype=float
     )
     
-    def step(self, delta, k = 100, trade_side =0): 
+    def _step_baseline(self, delta, k = 100): 
         """
-        Effectue une transition de l'environnement.
+    Transition de l'environnement avec impact simplifié de l'agent.
 
-        L'agent choisit un spread symétrique delta autour du mid :
-            p_bid = mid - delta
-            p_ask = mid + delta
+    Les probabilités de fill dépendent du spread et de l'imbalance.
+    Les transactions influencent directement le mid via un terme d'impact.
+    L'agent agit donc à la fois sur ses exécutions et sur la dynamique du prix.
 
-        La probabilité d'exécution suit :
-            p_fill = p0 * exp(-k * delta)
+    Paramètres
+    ----------
+    delta : float
+        Distance au mid choisie par l'agent.
 
-        Le fill est simulé par un tirage uniforme.
-
-        Paramètres
-        ----------
-        delta : float
-            Distance au mid (contrôle principal de l'agent).
-        k : float
-            Paramètre de décroissance de la probabilité de fill.
-        trade_side : int
-            Paramètre d'impact (±1 ou 0), censé représenter l'adverse selection.
-
-        Returns
-        -------
-        state : np.ndarray
-            Nouvel état.
-        reward : float
-            Reward instantané (variation de PnL pénalisée).
-        done : bool
-            Indicateur de fin d'épisode.
-
-        Remarques critiques
-        -------------------
-        - Le modèle de fill ne dépend pas du carnet → irréaliste.
-        - Le trade_side n'est pas endogène au fill → incohérent économiquement.
-        - Le reward est du type mark-to-market, ce qui introduit du bruit
-          important (problème classique en RL financier).
-        """
+    Retourne
+    --------
+    state : np.ndarray
+        Nouvel état après transition.
+    reward : float
+        Variation de PnL pénalisée par l'inventaire.
+    done : bool
+        Indique la fin de l'épisode.
+    """
         ##quotes
         p_bid = self.mid - delta
         p_ask = self.mid + delta
@@ -268,7 +254,7 @@ class MMSimulator :
         done = done_data or done_horizon
         #update du prochain mid sur les datas 
         mid_base_next = float(self.data.iloc[self.t]["mid"]) if not done else self.mid
-        mid_next = mid_base_next + (-trade_side)*self.phi_as
+        mid_next = mid_base_next 
         self.mid = mid_next
         mtm = self.cash + self.inventory *mid_next
         reward = mtm - self.prev_mtm
@@ -281,3 +267,106 @@ class MMSimulator :
         self.prev_mtm = mtm
 
         return self._state(), float(reward), done
+    
+    def _step_impact(self, delta, k=100, impact_coeff=0.01):
+        """
+        Transition de l'environnement avec impact simplifié de l'agent.
+
+        Les probabilités de fill dépendent du spread et de l'imbalance.
+        Les transactions influencent directement le mid via un terme d'impact.
+        L'agent agit donc à la fois sur ses exécutions et sur la dynamique du prix.
+
+        Paramètres
+        ----------
+        delta : float
+            Distance au mid choisie par l'agent.
+        k : float
+            Paramètre de décroissance des probabilités de fill.
+        impact_coeff : float
+            Intensité de l'impact des trades sur le mid-price.
+
+        Retourne
+        --------
+        state : np.ndarray
+            Nouvel état après transition.
+        reward : float
+            Variation de PnL pénalisée par l'inventaire.
+        done : bool
+            Indique la fin de l'épisode.
+        """
+        # Données de marché au temps courant
+        row = self.data.iloc[self.t]
+        bv = float(row["bid_vol"])
+        av = float(row["ask_vol"])
+        imb = (bv - av) / (bv + av + 1e-12)
+
+        # Quotes de l'agent
+        p_bid = self.mid - delta
+        p_ask = self.mid + delta
+
+        # Proba de fill de base
+        base_p = self.p_fill_base * np.exp(-k * float(delta))
+        base_p = float(np.clip(base_p, 0.0, 1.0))
+
+        # Asymétrie via imbalance
+        p_bid_fill = np.clip(base_p * (1.0 - imb), 0.0, 1.0)
+        p_ask_fill = np.clip(base_p * (1.0 + imb), 0.0, 1.0)
+
+        trade_sign = 0
+
+        # Fill côté bid : l'agent achète
+        if self.inventory < self.inv_max:
+            if self.rng.random() < p_bid_fill:
+                self.inventory += 1
+                self.cash -= p_bid
+                self.nb_trades += 1
+                trade_sign += 1
+
+        # Fill côté ask : l'agent vend
+        if self.inventory > self.inv_min:
+            if self.rng.random() < p_ask_fill:
+                self.inventory -= 1
+                self.cash += p_ask
+                self.nb_trades += 1
+                trade_sign -= 1
+
+        # Avance temporelle
+        self.t += 1
+
+        done_data = (self.t >= len(self.data) - 1)
+
+        done_horizon = False
+        if self.max_steps is not None:
+            done_horizon = (self.t - self.t0 >= self.max_steps)
+
+        done = done_data or done_horizon
+
+        # Mid exogène + impact des trades
+        mid_base_next = float(self.data.iloc[self.t]["mid"]) if not done else self.mid
+        mid_next = mid_base_next + impact_coeff * trade_sign
+        self.mid = mid_next
+
+        # Reward mark-to-market
+        mtm = self.cash + self.inventory * mid_next
+        reward = mtm - self.prev_mtm
+
+        inv_penalty = self.eta_inv * self.inventory**2
+        reward -= inv_penalty
+        self.penalty_sum += inv_penalty
+
+        self.inventory_path.append(self.inventory)
+        self.prev_mtm = mtm
+
+        return self._state(), float(reward), done
+    
+    def step(self, delta, k=100): 
+        """
+        Appelle la fonction de step associée au mode de dynamique initialisé dans l'env 
+        """
+        if self.dynamics_mode == "baseline":
+            return self._step_baseline(delta, k=k)
+        elif self.dynamics_mode == "impact":
+            return self._step_impact(delta, k=k)
+        else:
+            raise ValueError(f"Unknown dynamics_mode: {self.dynamics_mode}")
+        
