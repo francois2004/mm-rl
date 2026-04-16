@@ -223,3 +223,155 @@ history : dict
         history["episode_return"].append(ep_return.cpu())
 
     return history
+
+def train_one_episode_ppo(env : MMSimulator, actor : ActorNet, critic : CriticNet, 
+                      actor_optimizer, critic_optimizer, device, gamma, 
+                      n_epochs_actor = 10, n_epochs_critic = 10, random_reset = True, 
+                      max_steps = 200, verbose = False):
+    """
+    Exécute un épisode complet d'apprentissage Actor–Critic avec PPO
+
+    La fonction :
+    - collecte une trajectoire sous la politique courante ;
+    - calcule les returns à partir des rewards ;
+    - entraîne le critic pour approximer la fonction de valeur ;
+    - calcule les avantages ;
+    - entraîne l’acteur à partir de ces avantages.
+
+    Parameters
+    ----------
+    env : MMSimulator
+        Environnement de trading simulé.
+    actor : ActorNet
+        Réseau de politique.
+    critic : CriticNet
+        Réseau de valeur.
+    actor_optimizer : torch.optim.Optimizer
+        Optimiseur de l’acteur.
+    critic_optimizer : torch.optim.Optimizer
+        Optimiseur du critic.
+    device : torch.device
+        Device utilisé pour les calculs.
+    gamma : float
+        Facteur d’actualisation.
+    n_epochs_actor : int, optional
+        Nombre d’itérations d’entraînement de l’acteur.
+    n_epochs_critic : int, optional
+        Nombre d’itérations d’entraînement du critic.
+    random_reset : bool, optional
+        Si True, démarre l’épisode à un point aléatoire.
+    max_steps : int, optional
+        Longueur maximale de l’épisode.
+    verbose : bool, optional
+        Affiche des informations pendant l’entraînement.
+
+    Returns
+    -------
+    l_history_critic : list
+        Historique des pertes du critic sur l’épisode.
+    l_history_actor : list
+        Historique des pertes de l’acteur sur l’épisode.
+    episode_return : float
+        Somme des rewards sur l’épisode.
+    """
+    trajectory = collect_trajectory(env, actor, device, random_reset, max_steps)
+    # Récupération
+    states = trajectory["states"]
+    actions = trajectory["actions"]
+    rewards = trajectory["rewards"]
+    #pour PPO
+    old_log_probs = trajectory["old_log_probs"]
+
+    G = Loss.compute_returns(rewards, gamma)
+    if verbose :
+        print('[train_critic]')
+    l_history_critic, _ = tr.fit_critic(critic, critic_optimizer, states, rewards, gamma, n_epochs_critic, verbose)
+
+    A = Loss.compute_advantages(critic, states, G)
+    if verbose :
+        print('[train_actor]')
+    l_history_actor, _ = tr.fit_actor_ppo(actor, actor_optimizer, states, actions, A,old_log_probs,  n_epochs_actor, verbose)
+
+    return l_history_critic, l_history_actor, rewards.sum().item()
+
+
+
+
+def train_ppo(
+    env,
+    actor,
+    critic,
+    actor_optimizer,
+    critic_optimizer,
+    device,
+    gamma,
+    n_episodes=100,
+    n_epochs_actor=10,
+    n_epochs_critic=10,
+    random_reset=True,
+    max_steps=200,
+    verbose=False,
+):
+    """
+    Boucle d’apprentissage Actor–Critic avec PPO sur plusieurs épisodes.
+
+    À chaque épisode :
+    - une trajectoire est collectée ;
+    - le critic est entraîné sur les returns ;
+    - l’acteur est mis à jour à partir des avantages.
+
+    Les métriques principales sont enregistrées à chaque épisode.
+
+    Parameters
+    ----------
+    env : MMSimulator
+        Environnement de trading simulé.
+    actor : ActorNet
+        Réseau de politique.
+    critic : CriticNet
+        Réseau de valeur.
+    actor_optimizer : torch.optim.Optimizer
+        Optimiseur de l’acteur.
+    critic_optimizer : torch.optim.Optimizer
+        Optimiseur du critic.
+    device : torch.device
+        Device utilisé pour les calculs.
+    gamma : float
+        Facteur d’actualisation.
+    n_episodes : int
+        Nombre total d’épisodes d’entraînement.
+    n_epochs_actor : int, optional
+        Nombre d’itérations d’entraînement de l’acteur par épisode.
+    n_epochs_critic : int, optional
+        Nombre d’itérations d’entraînement du critic par épisode.
+    random_reset : bool, optional
+        Si True, démarre chaque épisode à un point aléatoire.
+    max_steps : int, optional
+        Longueur maximale des épisodes.
+    verbose : bool, optional
+        Affiche des informations pendant l’entraînement.
+
+    Returns
+    -------
+    history : dict
+        Dictionnaire contenant :
+        - "critic_loss" : liste des pertes finales du critic par épisode ;
+        - "actor_loss" : liste des pertes finales de l’acteur par épisode ;
+        - "episode_return" : liste des rewards cumulés par épisode.
+    """ 
+    history = {
+    "critic_loss": [],
+    "actor_loss": [],
+    "episode_return": []
+    }
+
+    for episode in range(n_episodes):
+        l_hist_critic, l_hist_actor, ep_return = train_one_episode_ppo(
+            env, actor, critic, actor_optimizer, critic_optimizer, device, gamma, n_epochs_actor, n_epochs_critic, random_reset, max_steps, verbose)
+        
+
+        history["critic_loss"].append(l_hist_critic[-1])
+        history["actor_loss"].append(l_hist_actor[-1])
+        history["episode_return"].append(ep_return)
+
+    return history

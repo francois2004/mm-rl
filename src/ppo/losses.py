@@ -105,6 +105,34 @@ class Loss :
 
         loss = -(log_prob * advantages).mean()
         return loss
+    
+    def loss_actor_ppo_fn(log_prob : torch.Tensor,old_log_prob : torch.Tensor, A : torch.Tensor, eps : float = 1e-1 ):
+        """
+        Perte de l'acteur avec PPO, c'est a dire perte définie selon 
+        le probability ratio 
+        r_t(theta) = exp(log_prob - log_prob_old)
+
+        Paramètres
+        ----------
+        log_prob : tensor (T,)
+            log probabilité des actions sous la politique courante 
+        log_prob_old : tensor(T,)
+            log probabilité des actions sous la politique précédente
+        A : tensor (T,)
+            Avantage le long de la trajectoire
+
+        Retourne 
+        --------
+        L : float
+            perte = E[r(theta)A] (avec clipping)
+        """
+        log_ratio = log_prob.reshape(-1) - old_log_prob.reshape(-1)
+        r_t = torch.exp(log_ratio)
+        clipped = torch.clamp(r_t, 1-eps, 1+eps)
+        advantages = A.reshape(-1).detach()
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        L = torch.min(r_t * advantages, clipped*advantages)
+        return -L.mean()
 
     
 
