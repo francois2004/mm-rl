@@ -2,7 +2,7 @@
 Module de calcul des pertes utiles 
 """
 import torch
-from src.POO.networks import ActorNet, CriticNet
+from src.ppo.networks import ActorNet, CriticNet
 
 class Loss :
     """
@@ -100,9 +100,10 @@ class Loss :
             Perte de l'acteur 
         """
         log_prob = log_prob.reshape(-1)
-        avantages = A.reshape(-1).detach()
+        advantages = A.reshape(-1).detach()
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        loss = -(log_prob - avantages).mean()
+        loss = -(log_prob * advantages).mean()
         return loss
 
     

@@ -1,4 +1,4 @@
-from src.env_toy_mm import MMSimulator
+from src.envs.env_toy_mm import MMSimulator
 import numpy as np
 
 def oi_bin(oi): 

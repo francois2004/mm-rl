@@ -2,8 +2,8 @@
 Boucles d'apprentissages de critiques et acteurs. 
 """
 import torch
-from src.POO.networks import CriticNet, ActorNet
-from src.POO.losses import Loss
+from src.ppo.networks import CriticNet, ActorNet
+from src.ppo.losses import Loss
 import time
 
 def fit_critic(model : CriticNet, optimizer, states : torch.Tensor, r_list : torch.Tensor,
