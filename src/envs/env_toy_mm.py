@@ -1,5 +1,6 @@
 import numpy as np 
 import pandas as pd 
+from src.features.market_features import build_market_features
 
 class MMSimulator : 
     """
@@ -39,18 +40,77 @@ class MMSimulator :
     phi_as : float
         Paramètre d'impact adverse (shift du mid après trade).
     """
-    def __init__(self, csv_path, seed = 42, p_fill_base = .30, eta_inv = .00001,
-                  inv_max = 50, inv_min = -50, phi_as = .02):
-        self.data = pd.read_csv(csv_path)
+    def __init__(
+    self,
+    csv_path,
+    seed=42,
+    p_fill_base=0.30,
+    eta_inv=1e-5,
+    inv_max=50,
+    inv_min=-50,
+    phi_as=0.02,
+    state_mode="simple",  # <-- nouveau
+):
+        """
+    Simulateur de market making sur données LOB.
+
+    Parameters
+    ----------
+    csv_path : str
+        Chemin vers les données brutes.
+    state_mode : str
+        "simple" ou "engineered"
+    """
+        raw = pd.read_csv(csv_path)
+
+        self.state_mode = state_mode
+
+        if state_mode == "simple":
+            self.data = raw.copy()
+
+        # Features minimales construites à la volée
+            self.data["spread"] = self.data["ask"] - self.data["bid"]
+            denom = self.data["bid_vol"] + self.data["ask_vol"] + 1e-12
+            self.data["imbalance"] = (self.data["bid_vol"] - self.data["ask_vol"]) / denom
+
+            self.state_columns = ["mid", "spread", "imbalance"]
+
+        elif state_mode == "engineered":
+            self.data = build_market_features(raw)
+
+            self.state_columns = [
+            "mid",
+            "spread",
+            "imbalance",
+            "microprice",
+            "return_1",
+            "ma_10",
+            "ma_20",
+            "rsi_14",
+        ]
+
+        else:
+            raise ValueError(f"Unknown state_mode: {state_mode}")
+
+    # Vérification de cohérence
+        for col in self.state_columns:
+            if col not in self.data.columns:
+                raise ValueError(f"Missing column in data: {col}")
+
+    # Dimension d'état (+ inventory)
+        self.state_dim = len(self.state_columns) + 1
+
+
         self.rng = np.random.default_rng(seed)
 
+    # paramètres de trading
         self.p_fill_base = p_fill_base
         self.eta_inv = eta_inv
-
         self.inv_max = inv_max
         self.inv_min = inv_min
         self.phi_as = phi_as
 
+    # gestion épisode
         self.max_steps = None
         self.t0 = None
 
@@ -120,24 +180,21 @@ class MMSimulator :
     
     def _state(self):
         """
-        Construit l'état courant observé par l'agent.
+    Construit l'état courant observé par l'agent.
 
-        État = (mid, spread, order imbalance, inventory)
-
-        - imbalance : (bid_vol - ask_vol) / (bid_vol + ask_vol)
-
-        Returns
-        -------
-        np.ndarray
-            Vecteur d'état de dimension 4.
-        """     
+    Returns
+    -------
+    np.ndarray
+        Etat de dimension state_dim
+    """
         row = self.data.iloc[self.t]
-        mid = float(self.mid)
-        spread = float(row["ask"] - row["bid"])
-        bv = float(row["bid_vol"])
-        av = float(row["ask_vol"])
-        imb = (bv - av) / (bv + av + 1e-12)
-        return np.array([mid, spread, imb, self.inventory], dtype=float)
+
+        market_state = [float(row[col]) for col in self.state_columns]
+
+        return np.array(
+        market_state + [float(self.inventory)],
+        dtype=float
+    )
     
     def step(self, delta, k = 100, trade_side =0): 
         """
