@@ -34,8 +34,8 @@ class ActorNet(nn.Module) :
 
         if n_layers < 1:
             raise ValueError("n_layers doit être >= 1")
-        if action_dim != 1:
-            raise ValueError("Cette version est écrite pour une action scalaire.")
+        if action_dim not in [1, 4]:
+            raise ValueError("action_dim doit valoir 1 ou 4")
         if delta_max <= delta_min:
             raise ValueError("Il faut delta_max > delta_min.")
 
@@ -81,30 +81,46 @@ class ActorNet(nn.Module) :
         std = log_std.exp()
         return distributions.Normal(mu, std)
     
-    def evaluate_actions(self, s: torch.Tensor, delta: torch.Tensor):
+    def evaluate_actions(self, s: torch.Tensor, action: torch.Tensor):
         """
         Évalue des actions déjà prises, utile pour PPO.
-
         Paramètres
         ----------
-        s : états, shape [batch, state_dim]
-        delta : actions bornées, shape [batch, 1]
+        s : tensor (batch, state_dim)
+            Etats
+        action : tensor (batch, action_dim)
+            Actions bornées
 
-        Renvoie
-        -------
-        log_prob : shape [batch, 1]
-        entropy  : shape [batch, 1]
+        Retourne
+        --------
+        log_prob : tensor (batch, 1)
+            Log-probabilité de l'action
+        entropy : tensor (batch, 1)
+            Entropie de la distribution latente
         """
         eps = 1e-6
 
-        # Ramène delta dans (0,1), puis dans (-1,1), puis inverse tanh.
-        a01 = (delta - self.delta_min) / (self.delta_max - self.delta_min)
-        a01 = torch.clamp(a01, eps, 1.0 - eps)
+        if self.action_dim == 1:
+            a01 = (action - self.delta_min) / (self.delta_max - self.delta_min)
+            a01 = torch.clamp(a01, eps, 1.0 - eps)
+
+        elif self.action_dim == 4:
+            a01 = torch.zeros_like(action)
+
+            a01[..., 0:1] = (action[..., 0:1] - self.delta_min) / (self.delta_max - self.delta_min)
+            a01[..., 1:2] = (action[..., 1:2] - self.delta_min) / (self.delta_max - self.delta_min)
+            a01[..., 2:3] = (action[..., 2:3] - self.q_min) / (self.q_max - self.q_min)
+            a01[..., 3:4] = (action[..., 3:4] - self.q_min) / (self.q_max - self.q_min)
+
+            a01 = torch.clamp(a01, eps, 1.0 - eps)
+
+        else:
+            raise ValueError(f"action_dim inattendu : {self.action_dim}")
 
         u = 2.0 * a01 - 1.0
         u = torch.clamp(u, -1.0 + eps, 1.0 - eps)
 
-        z = 0.5 * torch.log((1.0 + u) / (1.0 - u))  # artanh(u)
+        z = 0.5 * torch.log((1.0 + u) / (1.0 - u))
 
         dist = self._latent_dist(s)
         log_prob_z = dist.log_prob(z).sum(dim=-1, keepdim=True)
@@ -114,35 +130,33 @@ class ActorNet(nn.Module) :
         entropy = dist.entropy().sum(dim=-1, keepdim=True)
         return log_prob, entropy
     
-    def _squash_action(self, z): 
+    def _squash_action(self, z):
+
         """
-        transforme un latent z en action bornée
-
-        Paramètre 
-        ---------
-        z : tensor (batch, action_dim)
-            latent issu de la distribution gaussienne
-        
-        Retourne
-        --------
-        delta : tensor (batch, action_dim)
-            Action transformée dans [delta_min, delta_max]
-        """
-        u = torch.tanh(z)              # (-1, 1)
-        a01 = (u + 1.0) / 2.0          # (0, 1)
-
-        # Séparation des composantes
-        delta_bid = self.delta_min + (self.delta_max - self.delta_min) * a01[..., 0:1]
-        delta_ask = self.delta_min + (self.delta_max - self.delta_min) * a01[..., 1:2]
-
-        q_bid = self.q_min + (self.q_max - self.q_min) * a01[..., 2:3]
-        q_ask = self.q_min + (self.q_max - self.q_min) * a01[..., 3:4]
-
-        # Reconcatène
-        action = torch.cat([delta_bid, delta_ask, q_bid, q_ask], dim=-1)
-
-        return action
-    
+    Transforme un latent gaussien en action bornée.
+    Paramètres
+    ----------
+    z : torch.Tensor
+        Variable latente issue de la distribution.
+    Retourne
+    --------
+    action : torch.Tensor
+        Action bornée.
+    """
+        u = torch.tanh(z)
+        a01 = (u + 1.0) / 2.0
+        if self.action_dim == 1:
+            delta = self.delta_min + (self.delta_max - self.delta_min) * a01
+            return delta
+        elif self.action_dim == 4:
+            delta_bid = self.delta_min + (self.delta_max - self.delta_min) * a01[..., 0:1]
+            delta_ask = self.delta_min + (self.delta_max - self.delta_min) * a01[..., 1:2]
+            q_bid = self.q_min + (self.q_max - self.q_min) * a01[..., 2:3]
+            q_ask = self.q_min + (self.q_max - self.q_min) * a01[..., 3:4]  
+            action = torch.cat([delta_bid, delta_ask, q_bid, q_ask], dim=-1)
+            return action
+        else:
+            raise ValueError(f"action_dim inattendu : {self.action_dim}")
 
     def sample_action(self, state : torch.Tensor): 
         """

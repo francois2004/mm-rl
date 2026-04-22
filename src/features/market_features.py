@@ -43,8 +43,10 @@ def build_market_features(df_raw: pd.DataFrame) -> pd.DataFrame:
     df["return_1"] = df["mid"].diff().fillna(0.0)
 
     # Moyennes mobiles du mid
-    df["ma_10"] = df["mid"].rolling(window=10, min_periods=1).mean()
-    df["ma_20"] = df["mid"].rolling(window=20, min_periods=1).mean()
+    df["ma_10"] = df["mid"].rolling(window = 10, min_periods = 1).mean()
+    df["ma_15"] = df["mid"].rolling(window = 15, min_periods = 1).mean()
+    df["ma_20"] = df["mid"].rolling(window = 20, min_periods = 1).mean()
+    df["ma_30"] = df["mid"].rolling(window = 30, min_periods = 1).mean()
 
     # RSI(14) construit sur les variations du mid
     delta = df["mid"].diff().fillna(0.0)

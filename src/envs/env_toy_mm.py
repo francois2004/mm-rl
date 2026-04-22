@@ -62,45 +62,36 @@ class MMSimulator :
     state_mode : str
         "simple" ou "engineered"
     """
-        raw = pd.read_csv(csv_path)
-
         self.state_mode = state_mode
         self.dynamics_mode = dynamic_mode
 
+        raw = pd.read_csv(csv_path)
+
+        self.data = build_market_features(raw)
         if state_mode == "simple":
-            self.data = raw.copy()
-
-        # Features minimales construites à la volée
-            self.data["spread"] = self.data["ask"] - self.data["bid"]
-            denom = self.data["bid_vol"] + self.data["ask_vol"] + 1e-12
-            self.data["imbalance"] = (self.data["bid_vol"] - self.data["ask_vol"]) / denom
-
             self.state_columns = ["mid", "spread", "imbalance"]
 
         elif state_mode == "engineered":
-            self.data = build_market_features(raw)
-
             self.state_columns = [
-            "mid",
-            "spread",
-            "imbalance",
-            "microprice",
-            "return_1",
-            "ma_10",
-            "ma_20",
-            "rsi_14",
-        ]
+        "mid", "spread", "imbalance", "microprice",
+        "return_1", "ma_10", "ma_20", "rsi_14"
+    ]
 
-        else:
-            raise ValueError(f"Unknown state_mode: {state_mode}")
+        elif state_mode == "article_like":
+            self.state_columns = [
+        "rsi_14", "imbalance", "microprice",
+        "ma_10", "ma_15", "ma_30"
+    ]
+    # Dimension d'état (+ inventory)
+        self.state_dim = len(self.state_columns) + 1
+
 
     # Vérification de cohérence
         for col in self.state_columns:
             if col not in self.data.columns:
                 raise ValueError(f"Missing column in data: {col}")
 
-    # Dimension d'état (+ inventory)
-        self.state_dim = len(self.state_columns) + 1
+
 
 
         self.rng = np.random.default_rng(seed)
@@ -198,137 +189,77 @@ class MMSimulator :
         dtype=float
     )
     
-    def _step_baseline(self, delta, k = 100): 
+    def step(self, action, k=100, impact_coeff=0.01):
         """
-    Transition de l'environnement avec impact simplifié de l'agent.
+    Effectue une transition selon le mode dynamique choisi.
 
-    Les probabilités de fill dépendent du spread et de l'imbalance.
-    Les transactions influencent directement le mid via un terme d'impact.
-    L'agent agit donc à la fois sur ses exécutions et sur la dynamique du prix.
+    En mode "baseline", le prix reste exogène.
+    En mode "impact", les exécutions de l'agent déplacent le mid-price.
 
-    Paramètres
+    Parameters
     ----------
-    delta : float
-        Distance au mid choisie par l'agent.
+    action : array-like
+        Action scalaire ou vectorielle.
+    k : float
+        Sensibilité des probabilités de fill aux spreads.
+    impact_coeff : float
+        Intensité de l'impact sur le mid en mode "impact".
 
-    Retourne
-    --------
+    Returns
+    -------
     state : np.ndarray
-        Nouvel état après transition.
+        Nouvel état.
     reward : float
-        Variation de PnL pénalisée par l'inventaire.
+        Reward instantané.
     done : bool
-        Indique la fin de l'épisode.
+        Fin d'épisode.
     """
-        ##quotes
-        p_bid = self.mid - delta
-        p_ask = self.mid + delta
-
-        #proba de fills
-        p = self.p_fill_base * np.exp(-k * float(delta))
-        p = float(np.clip(p, 0.0, 1.0))
-    
-        #tirage + fill
-        u = self.rng.random()
-        #pour actualiser le mid selon le trade 
-        if self.inventory > self.inv_min: 
-            if u < p/2 : 
-                self.inventory -=1
-                self.cash+= p_ask
-                self.nb_trades+=1
-                
-        if self.inventory < self.inv_max : 
-            if (p/2 <= u< p)   : 
-                self.inventory +=1
-                self.cash -= p_bid
-                self.nb_trades += 1
-
-        self.t += 1
-
-        done_data = (self.t >= len(self.data) - 1)
-
-        done_horizon = False
-        if self.max_steps is not None:
-            done_horizon = (self.t - self.t0 >= self.max_steps)
-
-        done = done_data or done_horizon
-        #update du prochain mid sur les datas 
-        mid_base_next = float(self.data.iloc[self.t]["mid"]) if not done else self.mid
-        mid_next = mid_base_next 
-        self.mid = mid_next
-        mtm = self.cash + self.inventory *mid_next
-        reward = mtm - self.prev_mtm
-
-        inv_penalty = self.eta_inv * self.inventory**2
-        reward = reward - inv_penalty
-        self.penalty_sum += inv_penalty
-
-        self.inventory_path.append(self.inventory)
-        self.prev_mtm = mtm
-
-        return self._state(), float(reward), done
-    
-    def _step_impact(self, delta, k=100, impact_coeff=0.01):
-        """
-        Transition de l'environnement avec impact simplifié de l'agent.
-
-        Les probabilités de fill dépendent du spread et de l'imbalance.
-        Les transactions influencent directement le mid via un terme d'impact.
-        L'agent agit donc à la fois sur ses exécutions et sur la dynamique du prix.
-
-        Paramètres
-        ----------
-        delta : float
-            Distance au mid choisie par l'agent.
-        k : float
-            Paramètre de décroissance des probabilités de fill.
-        impact_coeff : float
-            Intensité de l'impact des trades sur le mid-price.
-
-        Retourne
-        --------
-        state : np.ndarray
-            Nouvel état après transition.
-        reward : float
-            Variation de PnL pénalisée par l'inventaire.
-        done : bool
-            Indique la fin de l'épisode.
-        """
-        # Données de marché au temps courant
         row = self.data.iloc[self.t]
-        bv = float(row["bid_vol"])
-        av = float(row["ask_vol"])
-        imb = (bv - av) / (bv + av + 1e-12)
 
-        # Quotes de l'agent
-        p_bid = self.mid - delta
-        p_ask = self.mid + delta
+        delta_bid, delta_ask, q_bid, q_ask = self._parse_action(action)
 
-        # Proba de fill de base
-        base_p = self.p_fill_base * np.exp(-k * float(delta))
-        base_p = float(np.clip(base_p, 0.0, 1.0))
+        # Tailles entières minimales
+        q_bid = max(1, int(round(q_bid)))
+        q_ask = max(1, int(round(q_ask)))
 
-        # Asymétrie via imbalance
-        p_bid_fill = np.clip(base_p * (1.0 - imb), 0.0, 1.0)
-        p_ask_fill = np.clip(base_p * (1.0 + imb), 0.0, 1.0)
+        # Quotes
+        p_bid = self.mid - delta_bid
+        p_ask = self.mid + delta_ask
+
+        # Probabilités de fill
+        if self.dynamics_mode == "baseline":
+            # version symétrique, sans effet imbalance
+            base_bid = self.p_fill_base * np.exp(-k * delta_bid)
+            base_ask = self.p_fill_base * np.exp(-k * delta_ask)
+
+            p_bid_fill = float(np.clip(base_bid / (1.0 + q_bid), 0.0, 1.0))
+            p_ask_fill = float(np.clip(base_ask / (1.0 + q_ask), 0.0, 1.0))
+
+        elif self.dynamics_mode == "impact":
+            p_bid_fill, p_ask_fill = self._compute_fill_probs(
+            delta_bid, delta_ask, q_bid, q_ask, row, k=k
+        )
+
+        else:
+            raise ValueError(f"Unknown dynamics_mode: {self.dynamics_mode}")
 
         trade_sign = 0
 
         # Fill côté bid : l'agent achète
-        if self.inventory < self.inv_max:
+        if self.inventory + q_bid <= self.inv_max:
             if self.rng.random() < p_bid_fill:
-                self.inventory += 1
-                self.cash -= p_bid
+                self.inventory += q_bid
+                self.cash -= q_bid * p_bid
                 self.nb_trades += 1
-                trade_sign += 1
+                trade_sign += q_bid
 
         # Fill côté ask : l'agent vend
-        if self.inventory > self.inv_min:
+        if self.inventory - q_ask >= self.inv_min:
             if self.rng.random() < p_ask_fill:
-                self.inventory -= 1
-                self.cash += p_ask
+                self.inventory -= q_ask
+                self.cash += q_ask * p_ask
                 self.nb_trades += 1
-                trade_sign -= 1
+                trade_sign -= q_ask
 
         # Avance temporelle
         self.t += 1
@@ -341,13 +272,17 @@ class MMSimulator :
 
         done = done_data or done_horizon
 
-        # Mid exogène + impact des trades
+        # Mid suivant
         mid_base_next = float(self.data.iloc[self.t]["mid"]) if not done else self.mid
-        mid_next = mid_base_next + impact_coeff * trade_sign
-        self.mid = mid_next
+
+        if self.dynamics_mode == "baseline":
+            self.mid = mid_base_next
+
+        elif self.dynamics_mode == "impact":
+            self.mid = mid_base_next + impact_coeff * trade_sign
 
         # Reward mark-to-market
-        mtm = self.cash + self.inventory * mid_next
+        mtm = self.cash + self.inventory * self.mid
         reward = mtm - self.prev_mtm
 
         inv_penalty = self.eta_inv * self.inventory**2
@@ -358,15 +293,83 @@ class MMSimulator :
         self.prev_mtm = mtm
 
         return self._state(), float(reward), done
+        
+    def _parse_action(self, action):
+        """
+        prends l'action et la sépare de manière a pouvoir l'utiliser 
+
+        Paramètre
+        ---------
+        action : tensor(T,action_dim)
+            action prise dans la politique actuelle 
+
+        Retourne 
+        --------
+        d_bid, d_ask, q_bid, q_ask : les quotes d et leur volume q associé. 
+        """
+  
+        if isinstance(action, (float, int)):
+            action = np.array([action], dtype=float)
+
+        elif hasattr(action, "detach"):  # torch.Tensor
+            action = action.detach().cpu().numpy()
+
+        action = np.asarray(action, dtype=float).reshape(-1)
+
+        # Cas 1D (ancien modèle)
+        if action.shape[0] == 1:
+            delta = float(action[0])
+            return delta, delta, 1.0, 1.0
+
+        # Cas 4D (nouveau modèle)
+        if action.shape[0] == 4:
+            d_bid, d_ask, q_bid, q_ask = action
+            return float(d_bid), float(d_ask), float(q_bid), float(q_ask)
+
+        raise ValueError(f"Action de dimension invalide : {action.shape}")
+        
+    def _compute_fill_probs(self, delta_bid, delta_ask, q_bid, q_ask ,row, k = 100): 
+        """
+    Calcule les probabilités de fill côté bid et ask.
+
+    Parameters
+    ----------
+    delta_bid : float
+    delta_ask : float
+    q_bid : float
+    q_ask : float
+    row : pd.Series
+        Ligne courante des données de marché
+    k : float
+        Sensibilité des fills au spread
+
+    Returns
+    -------
+    p_bid_fill : float
+    p_ask_fill : float
+    """
+        bv = float(row["bid_vol"])
+        av = float(row["ask_vol"])
+        imb = (bv - av)/(bv + av + 1e-12)
+        
+        base_bid = self.p_fill_base * np.exp(-k * delta_bid)
+        base_ask = self.p_fill_base * np.exp(-k * delta_ask)
+
+        # asymétrie via imbalance
+        p_bid_fill = base_bid * (1.0 - imb)
+        p_ask_fill = base_ask * (1.0 + imb)
+
+        # effet taille simple : plus la quantité est grande, plus c'est difficile à exécuter
+        size_bid_penalty = 1.0 / (1.0 + q_bid)
+        size_ask_penalty = 1.0 / (1.0 + q_ask)
+
+        p_bid_fill *= size_bid_penalty
+        p_ask_fill *= size_ask_penalty
+
+        p_bid_fill = float(np.clip(p_bid_fill, 0.0, 1.0))
+        p_ask_fill = float(np.clip(p_ask_fill, 0.0, 1.0))
+
+        return p_bid_fill, p_ask_fill
     
-    def step(self, delta, k=100): 
-        """
-        Appelle la fonction de step associée au mode de dynamique initialisé dans l'env 
-        """
-        if self.dynamics_mode == "baseline":
-            return self._step_baseline(delta, k=k)
-        elif self.dynamics_mode == "impact":
-            return self._step_impact(delta, k=k)
-        else:
-            raise ValueError(f"Unknown dynamics_mode: {self.dynamics_mode}")
+
         

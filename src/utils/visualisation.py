@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import torch 
 import time
 
+
 def plot_lob(df, n_points=200):
     """
     Visualise la structure du LOB :
@@ -215,3 +216,71 @@ def run_training_experiment(
     plt.show()
 
     return history, elapsed
+
+
+def analyze_policy_actions(traj,env,actor, inventory_index=-1, imbalance_index=2):
+    """
+    Analyse les actions apprises sur une trajectoire.
+
+    Parameters
+    ----------
+    traj : dict
+        Sortie de collect_trajectory
+    inventory_index : int
+        Indice de l'inventory dans l'état
+    imbalance_index : int
+        Indice de l'imbalance dans l'état
+    """
+    actions = traj["actions"].detach().cpu().numpy()
+    states = traj["states"].detach().cpu().numpy()
+    parse = np.array([env._parse_action(a)for a in actions])
+    delta_bid = parse[:, 0]
+    delta_ask = parse[:, 1]
+    q_bid = parse[:, 2]
+    q_ask = parse[:, 3]
+
+    inventory = states[:, inventory_index]
+    imbalance = states[:, imbalance_index]
+
+    delta_diff = delta_ask - delta_bid
+    q_diff = q_ask - q_bid
+
+    fig, axes = plt.subplots(3, 2, figsize=(12, 12))
+
+    fig.suptitle(f"Policy Analysis - Action dim = {actor.action_dim} - mode = {env.dynamics_mode}")
+
+    axes[0, 0].hist(delta_bid, bins=25)
+    axes[0, 0].set_title("delta_bid")
+
+    axes[0, 1].hist(delta_ask, bins=25)
+    axes[0, 1].set_title("delta_ask")
+
+    axes[1, 0].hist(q_bid, bins=25)
+    axes[1, 0].set_title("q_bid")
+
+    axes[1, 1].hist(q_ask, bins=25)
+    axes[1, 1].set_title("q_ask")
+
+    axes[2, 0].scatter(inventory, delta_diff, s=8, alpha=0.5)
+    axes[2, 0].set_title("delta_ask - delta_bid vs inventory")
+    axes[2, 0].set_xlabel("inventory")
+
+    axes[2, 1].scatter(inventory, q_diff, s=8, alpha=0.5)
+    axes[2, 1].set_title("q_ask - q_bid vs inventory")
+    axes[2, 1].set_xlabel("inventory")
+
+    plt.tight_layout()
+    plt.show()
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    axes[0].scatter(imbalance, delta_diff, s=8, alpha=0.5)
+    axes[0].set_title("Spread asymmetry vs imbalance")
+    axes[0].set_xlabel("imbalance")
+
+    axes[1].scatter(imbalance, q_diff, s=8, alpha=0.5)
+    axes[1].set_title("Size asymmetry vs imbalance")
+    axes[1].set_xlabel("imbalance")
+
+    plt.tight_layout()
+    plt.show()
