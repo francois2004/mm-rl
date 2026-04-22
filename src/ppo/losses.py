@@ -224,7 +224,7 @@ class Loss :
         """
         advantages = advantages.reshape(-1)
         values = values.reshape(-1)
-        return advantages - values
+        return advantages + values
     
 
 
