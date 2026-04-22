@@ -284,3 +284,219 @@ def analyze_policy_actions(traj,env,actor, inventory_index=-1, imbalance_index=2
 
     plt.tight_layout()
     plt.show()
+
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+
+
+def _to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    return np.asarray(x)
+
+
+def analyze_policy_actions(
+    traj,
+    env,
+    actor,
+    inventory_index=-1,
+    imbalance_index=2,
+    save=True,
+    save_dir="docs/report/images",
+    prefix="policy_analysis"
+):
+    """
+    Analyse les actions apprises sur une trajectoire
+    + sauvegarde automatique des figures.
+
+    Parameters
+    ----------
+    traj : dict
+        Sortie de collect_trajectory
+    env : env
+    actor : ActorNet
+    inventory_index : int
+    imbalance_index : int
+    save : bool
+    save_dir : str
+    prefix : str
+    """
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    actions = _to_numpy(traj["actions"])
+    states = _to_numpy(traj["states"])
+
+    if actions.ndim == 1:
+        actions = actions.reshape(-1, 1)
+
+    parse = np.array([env._parse_action(a) for a in actions])
+
+    delta_bid = parse[:, 0]
+    delta_ask = parse[:, 1]
+    q_bid = parse[:, 2]
+    q_ask = parse[:, 3]
+
+    inventory = states[:, inventory_index]
+    imbalance = states[:, imbalance_index]
+
+    delta_diff = delta_ask - delta_bid
+    q_diff = q_ask - q_bid
+
+    mode = getattr(env, "dynamic_mode", getattr(env, "dynamics_mode", "unknown"))
+
+    # ==================================================
+    # FIGURE 1
+    # ==================================================
+    fig, axes = plt.subplots(3, 2, figsize=(12, 12))
+
+    fig.suptitle(
+        f"Policy Analysis - action_dim={actor.action_dim} - mode={mode}"
+    )
+
+    axes[0, 0].hist(delta_bid, bins=25)
+    axes[0, 0].set_title("delta_bid")
+
+    axes[0, 1].hist(delta_ask, bins=25)
+    axes[0, 1].set_title("delta_ask")
+
+    axes[1, 0].hist(q_bid, bins=25)
+    axes[1, 0].set_title("q_bid")
+
+    axes[1, 1].hist(q_ask, bins=25)
+    axes[1, 1].set_title("q_ask")
+
+    axes[2, 0].scatter(inventory, delta_diff, s=8, alpha=0.5)
+    axes[2, 0].set_title("delta_ask - delta_bid vs inventory")
+    axes[2, 0].set_xlabel("inventory")
+
+    axes[2, 1].scatter(inventory, q_diff, s=8, alpha=0.5)
+    axes[2, 1].set_title("q_ask - q_bid vs inventory")
+    axes[2, 1].set_xlabel("inventory")
+
+    for ax in axes.ravel():
+        ax.grid(alpha=0.25)
+
+    plt.tight_layout()
+
+    if save:
+        path = os.path.join(save_dir, f"{prefix}_inventory.png")
+        fig.savefig(path, dpi=180, bbox_inches="tight")
+        print("Saved:", path)
+
+    plt.show()
+
+    # ==================================================
+    # FIGURE 2
+    # ==================================================
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    axes[0].scatter(imbalance, delta_diff, s=8, alpha=0.5)
+    axes[0].set_title("Spread asymmetry vs imbalance")
+    axes[0].set_xlabel("imbalance")
+    axes[0].grid(alpha=0.25)
+
+    axes[1].scatter(imbalance, q_diff, s=8, alpha=0.5)
+    axes[1].set_title("Size asymmetry vs imbalance")
+    axes[1].set_xlabel("imbalance")
+    axes[1].grid(alpha=0.25)
+
+    plt.tight_layout()
+
+    if save:
+        path = os.path.join(save_dir, f"{prefix}_imbalance.png")
+        fig.savefig(path, dpi=180, bbox_inches="tight")
+        print("Saved:", path)
+
+    plt.show()
+
+def moving_average(x, w=50):
+    x = np.asarray(x, dtype=float)
+    if len(x) < w:
+        return x
+    return np.convolve(x, np.ones(w)/w, mode="valid")
+
+
+def plot_training_results(
+    history,
+    label="Training",
+    save=False,
+    save_dir="docs/report/images",
+    filename=None,
+    ma_window=50,
+    dpi=180
+):
+    """
+    Affiche les courbes d'entraînement PPO.
+
+    Paramètres
+    ----------
+    history : dict
+        contient critic_loss, actor_loss, episode_return
+    save : bool
+        sauvegarde la figure
+    save_dir : str
+        dossier cible
+    filename : str
+        nom du fichier (sans extension)
+    ma_window : int
+        fenêtre moyenne mobile returns
+    """
+
+    critic_loss = np.array(history["critic_loss"], dtype=float)
+    actor_loss = np.array(history["actor_loss"], dtype=float)
+    returns = np.array(history["episode_return"], dtype=float)
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
+
+    # Critic
+    axes[0].plot(critic_loss, lw=1.2)
+    axes[0].set_title("Critic loss")
+    axes[0].set_xlabel("Episode")
+    axes[0].grid(alpha=0.3)
+
+    # Actor
+    axes[1].plot(actor_loss, lw=1.2)
+    axes[1].set_title("Actor loss")
+    axes[1].set_xlabel("Episode")
+    axes[1].grid(alpha=0.3)
+
+    # Returns
+    axes[2].plot(returns, alpha=0.35, lw=1.0, label="raw")
+
+    ma = moving_average(returns, ma_window)
+    if len(returns) >= ma_window:
+        axes[2].plot(
+            range(ma_window - 1, len(returns)),
+            ma,
+            lw=2,
+            label=f"MA({ma_window})"
+        )
+
+    axes[2].set_title("Episode returns")
+    axes[2].set_xlabel("Episode")
+    axes[2].grid(alpha=0.3)
+    axes[2].legend()
+
+    fig.suptitle(label, fontsize=14)
+    plt.tight_layout()
+
+    if save:
+        os.makedirs(save_dir, exist_ok=True)
+
+        if filename is None:
+            filename = label.lower().replace(" ", "_")
+
+        png_path = os.path.join(save_dir, filename + ".png")
+        pdf_path = os.path.join(save_dir, filename + ".pdf")
+
+        fig.savefig(png_path, dpi=dpi, bbox_inches="tight")
+        fig.savefig(pdf_path, bbox_inches="tight")
+
+        print("Saved:", png_path)
+        print("Saved:", pdf_path)
+
+    plt.show()

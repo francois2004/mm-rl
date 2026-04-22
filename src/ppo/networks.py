@@ -50,9 +50,9 @@ class ActorNet(nn.Module) :
         self.q_min = q_min
         self.q_max = q_max
 
-        layers = [nn.Linear(state_dim, hidden_size), nn.Tanh()]
+        layers = [nn.Linear(state_dim, hidden_size), nn.ReLU()]
         for _ in range(n_layers - 1):
-            layers += [nn.Linear(hidden_size, hidden_size), nn.Tanh()]
+            layers += [nn.Linear(hidden_size, hidden_size), nn.ReLU()]
         self.backbone = nn.Sequential(*layers)
 
         self.mu_head = nn.Linear(hidden_size, action_dim)
@@ -195,9 +195,9 @@ class ActorNet(nn.Module) :
 class CriticNet(nn.Module):
     def __init__(self, state_dim=4, hidden_size=64, n_layers=3):
         super().__init__()
-        layers = [nn.Linear(state_dim, hidden_size), nn.Tanh()]
+        layers = [nn.Linear(state_dim, hidden_size), nn.ReLU()]
         for _ in range(n_layers - 1):
-            layers += [nn.Linear(hidden_size, hidden_size), nn.Tanh()]
+            layers += [nn.Linear(hidden_size, hidden_size), nn.ReLU()]
         layers += [nn.Linear(hidden_size, 1)]
         self.network = nn.Sequential(*layers)
 

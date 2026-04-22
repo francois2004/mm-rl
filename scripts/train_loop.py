@@ -1,7 +1,7 @@
 """
 algorithmes d'entrainement, mise en oeuvre
 """
-
+from tqdm.auto import tqdm
 import torch 
 import time
 import numpy as np
@@ -340,8 +340,16 @@ def train_ppo(
         "actor_loss": [],
         "episode_return": []
     }
+    episode_iter = tqdm(
+        range(n_episodes),
+        desc="Training PPO",
+        disable=not verbose,
+        dynamic_ncols=True,
+        leave=True,
+    )
 
-    for episode in range(n_episodes):
+    for ep in episode_iter:
+        t0 = time.time()
         l_hist_critic, l_hist_actor, ep_return = train_one_episode_ppo(
             env=env,
             actor=actor,
@@ -356,13 +364,16 @@ def train_ppo(
             batch_size=batch_size,
             random_reset=random_reset,
             max_steps=max_steps,
-            verbose=verbose
+            verbose=False
         )
-
-        history["critic_loss"].append(l_hist_critic[-1])
-        history["actor_loss"].append(l_hist_actor[-1])
-        history["episode_return"].append(ep_return)
-
+        dt = time.time()-t0
+        critic_loss_ep = float(np.mean(l_hist_critic)) if len(l_hist_critic) > 0 else np.nan
+        actor_loss_ep = float(np.mean(l_hist_actor)) if len(l_hist_actor) > 0 else np.nan
+        
+        history["critic_loss"].append(critic_loss_ep)
+        history["actor_loss"].append(actor_loss_ep)
+        history["episode_return"].append(float(ep_return))
+    
     return history
 def fit_actor_ppo(
     model: ActorNet,
@@ -467,117 +478,61 @@ def fit_actor_ppo(
 
 
 def fit_actor_ppo(
-
     model,
-
     optimizer,
-
     states: torch.Tensor,
-
     actions: torch.Tensor,
-
     old_log_prob: torch.Tensor,
-
     advantages: torch.Tensor,
-
     n_epochs: int = 10,
-
     batch_size: int = 256,
-
     eps_clip: float = 0.25,
-
     entropy_coef: float = 1.2e-3,
-
     shuffle: bool = True,
-
     verbose: bool = False
-
 ):
-
     """
-
     Boucle d'entraînement PPO de l'acteur avec mini-batches.
-
     """
-
     l_history = []
-
     t0 = time.time()
-
     model.train()
-
     T = states.shape[0]
-
     old_log_prob = old_log_prob.detach().reshape(-1)
-
     advantages = advantages.detach().reshape(-1)
-
     for epoch in range(n_epochs):
-
         if shuffle:
-
             perm = torch.randperm(T, device=states.device)
-
         else:
-
             perm = torch.arange(T, device=states.device)
-
         epoch_losses = []
-
         for start in range(0, T, batch_size):
-
             idx = perm[start:start + batch_size]
-
             batch_states = states[idx]
-
             batch_actions = actions[idx]
-
             batch_old_log_prob = old_log_prob[idx]
-
             batch_advantages = advantages[idx]
-
             optimizer.zero_grad()
-
             log_prob, entropy = model.evaluate_actions(batch_states, batch_actions)
-
             loss = Loss.actor_loss_ppo_fn(
-
                 log_prob=log_prob,
-
                 old_log_prob=batch_old_log_prob,
-
                 A=batch_advantages,
-
                 entropy=entropy,
-
                 eps_clip=eps_clip,
-
                 entropy_coef=entropy_coef
-
             )
-
             loss.backward()
-
             optimizer.step()
-
             epoch_losses.append(loss.item())
-
         mean_loss = float(np.mean(epoch_losses))
-
         l_history.append(mean_loss)
-
         if verbose and ((epoch + 1) % 5 == 0 or epoch == 0):
-
             print(
-
                 f"[fit_actor_ppo] epoch={epoch+1}/{n_epochs} "
-
                 f"loss={mean_loss:.4e}"
-
             )
-
     elapsed_time = time.time() - t0
-
     return l_history, elapsed_time
 
 def fit_critic_ppo(

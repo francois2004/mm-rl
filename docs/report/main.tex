@@ -1,0 +1,87 @@
+\documentclass[11pt,a4paper,oneside]{report}
+
+\input{preamble}
+
+\title{Reinforcement Learning for Market Making\\[0.3em]
+\large Toward a PPO-Based Approximation of Stochastic Control in Limit Order Book Dynamics}
+\author{François}
+\date{\today}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\scshape\LARGE Université Paris Cité \par}
+    \vspace{1.2cm}
+    {\scshape\Large Master 2 Mathématiques et Applications\par}
+    \vspace{1.8cm}
+    {\huge\bfseries Reinforcement Learning for Market Making\par}
+    \vspace{0.4cm}
+    {\Large Toward a PPO-Based Approximation of Stochastic Control in Limit Order Book Dynamics\par}
+    \vspace{2cm}
+
+    {\Large François \par}
+    \vspace{0.5cm}
+    {\large Année universitaire 2025--2026\par}
+
+    \vfill
+
+    \begin{flushleft}
+        \textbf{Encadrement :} \\
+        Nom de l'encadrant académique \\
+        Nom de l'encadrant projet / stage
+    \end{flushleft}
+
+    \vfill
+\end{titlepage}
+
+\pagenumbering{roman}
+
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+\input{sections/00_abstract}
+
+\tableofcontents
+\clearpage
+
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+\input{sections/01_introduction}
+
+\chapter{Literature Review}
+\input{sections/02_literature_review}
+
+\chapter{Problem Formulation}
+\input{sections/03_problem_formulation}
+
+\chapter{Environment and Market Simulator}
+\input{sections/04_environment}
+
+\chapter{Reinforcement Learning Method}
+\input{sections/05_rl_method}
+
+\chapter{Implementation}
+\input{sections/06_implementation}
+
+\chapter{Experiments}
+\input{sections/07_experiments}
+
+\chapter{Results}
+\input{sections/08_results}
+
+\chapter{Discussion}
+\input{sections/09_discussion}
+
+\chapter{Conclusion}
+\input{sections/10_conclusion}
+
+\appendix
+\chapter{Additional Material}
+À compléter si besoin.
+
+\clearpage
+\bibliographystyle{plainnat}
+\bibliography{bibliography}
+
+\end{document}

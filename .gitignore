@@ -13,14 +13,25 @@ mm-rl-backup/
 .ipynb_checkpoints/
 
 # LaTeX
+# LaTeX
 *.aux
-*.log
-*.fls
+*.bbl
+*.blg
 *.fdb_latexmk
-*.synctex.gz
+*.fls
+*.log
 *.out
+*.synctex.gz
 *.toc
+*.lof
+*.lot
+*.bcf
+*.run.xml
+*.nav
+*.snm
+*.vrb
 
+reports/report/build/
 # Artifacts
 logs/
 data/processed/
