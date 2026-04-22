@@ -211,8 +211,8 @@ class Loss :
         delta = Loss.compute_td_residual(rewards, values, next_values, dones, gamma)
         gae = torch.zeros_like(delta)
         gae[-1] = delta[-1]
-        for i in range(1, len(gae)-1): 
-            gae[-i-1] = delta[-i-1] + gamma*lam*(1-dones[-i])*gae[-i]
+        for i in reversed(range(len(gae)-1)): 
+            gae[i] = delta[i] + gamma*lam*(1-dones[i])*gae[i+1]
         ### Normalisation
         gae = (gae - gae.mean())/(gae.std()+1e-12)
         return gae
@@ -224,7 +224,7 @@ class Loss :
         """
         advantages = advantages.reshape(-1)
         values = values.reshape(-1)
-        return advantages - values
+        return advantages + values
     
 
 
