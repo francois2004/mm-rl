@@ -50,7 +50,8 @@ class MMSimulator :
     inv_min=-50,
     phi_as=0.02,
     state_mode="simple", 
-    dynamic_mode = "baseline"
+    dynamic_mode = "baseline",
+    fill_mode = "independent"
 ):
         """
     Simulateur de market making sur données LOB.
@@ -102,6 +103,7 @@ class MMSimulator :
         self.inv_max = inv_max
         self.inv_min = inv_min
         self.phi_as = phi_as
+        self.fill_mode = fill_mode
 
     # gestion épisode
         self.max_steps = None
@@ -188,33 +190,126 @@ class MMSimulator :
         market_state + [float(self.inventory)],
         dtype=float
     )
-    
-    def step(self, action, k=100, impact_coeff=0.01):
+    def _compute_hawkes_fill_probs(self, delta_bid, delta_ask, q_bid, q_ask, row, k = 10): 
         """
-    Effectue une transition selon le mode dynamique choisi.
+        Probabilités de fill bid / ask basées sur des intensités de Hawkes discrétisées.
 
-    En mode "baseline", le prix reste exogène.
-    En mode "impact", les exécutions de l'agent déplacent le mid-price.
+        Nécessite d'initialiser dans __init__ ou reset :
 
-    Parameters
-    ----------
-    action : array-like
-        Action scalaire ou vectorielle.
-    k : float
-        Sensibilité des probabilités de fill aux spreads.
-    impact_coeff : float
-        Intensité de l'impact sur le mid en mode "impact".
+            self.lambda_bid
+            self.lambda_ask
 
-    Returns
-    -------
-    state : np.ndarray
-        Nouvel état.
-    reward : float
-        Reward instantané.
-    done : bool
-        Fin d'épisode.
-    """
+        Paramètres conseillés à stocker aussi :
+
+            self.hawkes_mu_bid
+            self.hawkes_mu_ask
+            self.hawkes_beta
+            self.hawkes_alpha_bb
+           self.hawkes_alpha_ba
+            self.hawkes_alpha_aa
+            self.hawkes_alpha_ab
+
+        Returns
+        -------
+        p_bid_fill, p_ask_fill : float
+        """
+
+        # =========================
+        # 1. Paramètres (fallback si absents)
+        # =========================
+        mu_bid = getattr(self, "hawkes_mu_bid", self.p_fill_base)
+        mu_ask = getattr(self, "hawkes_mu_ask", self.p_fill_base)
+
+        beta = getattr(self, "hawkes_beta", 0.20)
+
+        alpha_bb = getattr(self, "hawkes_alpha_bb", 0.15)  # bid excite bid
+        alpha_ba = getattr(self, "hawkes_alpha_ba", 0.05)  # ask excite bid
+
+        alpha_aa = getattr(self, "hawkes_alpha_aa", 0.15)  # ask excite ask
+        alpha_ab = getattr(self, "hawkes_alpha_ab", 0.05)  # bid excite ask
+
+        # =========================
+        # 2. Initialisation sécurité
+        # =========================
+        if not hasattr(self, "lambda_bid"):
+            self.lambda_bid = mu_bid
+
+        if not hasattr(self, "lambda_ask"):
+            self.lambda_ask = mu_ask
+
+        # =========================
+        # 3. Décroissance vers la moyenne
+        # =========================
+        self.lambda_bid = mu_bid + (self.lambda_bid - mu_bid) * np.exp(-beta)
+        self.lambda_ask = mu_ask + (self.lambda_ask - mu_ask) * np.exp(-beta)
+
+        # =========================
+        # 4. Effet quote / size
+        # =========================
+        quote_bid = np.exp(-k * delta_bid) / (1.0 + q_bid)
+        quote_ask = np.exp(-k * delta_ask) / (1.0 + q_ask)
+
+        lam_bid_eff = self.lambda_bid * quote_bid
+        lam_ask_eff = self.lambda_ask * quote_ask
+
+        # =========================
+        # 5. Intensité -> probabilité
+        # =========================
+        p_bid_fill = float(np.clip(1.0 - np.exp(-lam_bid_eff), 0.0, 1.0))
+        p_ask_fill = float(np.clip(1.0 - np.exp(-lam_ask_eff), 0.0, 1.0))
+
+        # =========================
+        # 6. Tirages fictifs pour mise à jour Hawkes
+        # (événements de marché observés)
+        # =========================
+        n_bid = 1 if self.rng.random() < p_bid_fill else 0
+        n_ask = 1 if self.rng.random() < p_ask_fill else 0
+
+        # =========================
+        # 7. Auto / cross excitation
+        # =========================
+        self.lambda_bid += alpha_bb * n_bid + alpha_ba * n_ask
+        self.lambda_ask += alpha_aa * n_ask + alpha_ab * n_bid
+
+        # garde-fou
+        self.lambda_bid = max(1e-8, self.lambda_bid)
+        self.lambda_ask = max(1e-8, self.lambda_ask)
+
+        return p_bid_fill, p_ask_fill
+
+    def step(self, action, k=10, impact_coeff=0.01):
+        """
+        Effectue une transition selon le mode dynamique choisi.
+
+        En mode "baseline", le prix reste exogène.
+        En mode "impact", les exécutions de l'agent déplacent le mid-price.
+
+        Parameters
+        ----------
+        action : array-like
+            Action scalaire ou vectorielle.
+        k : float
+            Sensibilité des probabilités de fill aux spreads.
+        impact_coeff : float
+            Intensité de l'impact sur le mid en mode "impact".
+        fill_mode : str
+            Mode de génération des fills :
+            - "exclusive"   : au plus un fill par pas
+            - "independent" : fills bid/ask tirés séparément
+            - "hawkes"      : probabilités issues d'un moteur Hawkes,
+                              puis tirages séparés bid/ask
+
+        Returns
+        -------
+        state : np.ndarray
+            Nouvel état.
+        reward : float
+            Reward instantané.
+        done : bool
+            Fin d'épisode.
+        """
         row = self.data.iloc[self.t]
+        fill_mode = self.fill_mode
 
         delta_bid, delta_ask, q_bid, q_ask = self._parse_action(action)
 
@@ -226,40 +321,83 @@ class MMSimulator :
         p_bid = self.mid - delta_bid
         p_ask = self.mid + delta_ask
 
+        # =========================
         # Probabilités de fill
-        if self.dynamics_mode == "baseline":
-            # version symétrique, sans effet imbalance
-            base_bid = self.p_fill_base * np.exp(-k * delta_bid)
-            base_ask = self.p_fill_base * np.exp(-k * delta_ask)
-
-            p_bid_fill = float(np.clip(base_bid / (1.0 + q_bid), 0.0, 1.0))
-            p_ask_fill = float(np.clip(base_ask / (1.0 + q_ask), 0.0, 1.0))
-
-        elif self.dynamics_mode == "impact":
-            p_bid_fill, p_ask_fill = self._compute_fill_probs(
-            delta_bid, delta_ask, q_bid, q_ask, row, k=k
-        )
+        # =========================
+        if fill_mode == "hawkes":
+            p_bid_fill, p_ask_fill = self._compute_hawkes_fill_probs(
+                delta_bid, delta_ask, q_bid, q_ask, row, k=k
+            )
 
         else:
-            raise ValueError(f"Unknown dynamics_mode: {self.dynamics_mode}")
+            if self.dynamics_mode == "baseline":
+                base_bid = self.p_fill_base * np.exp(-k * delta_bid)
+                base_ask = self.p_fill_base * np.exp(-k * delta_ask)
+
+                p_bid_fill = float(np.clip(base_bid / (1.0 + q_bid), 0.0, 1.0))
+                p_ask_fill = float(np.clip(base_ask / (1.0 + q_ask), 0.0, 1.0))
+
+            elif self.dynamics_mode == "impact":
+                p_bid_fill, p_ask_fill = self._compute_fill_probs(
+                    delta_bid, delta_ask, q_bid, q_ask, row, k=k
+                )
+
+            else:
+                raise ValueError(f"Unknown dynamics_mode: {self.dynamics_mode}")
 
         trade_sign = 0
+        did_bid = False
+        did_ask = False
 
-        # Fill côté bid : l'agent achète
-        if self.inventory + q_bid <= self.inv_max:
-            if self.rng.random() < p_bid_fill:
+        # =========================
+        # Gestion des fills
+        # =========================
+        if fill_mode == "exclusive":
+            u = self.rng.random()
+
+            if (
+                u < p_bid_fill
+                and self.inventory + q_bid <= self.inv_max
+            ):
                 self.inventory += q_bid
                 self.cash -= q_bid * p_bid
                 self.nb_trades += 1
                 trade_sign += q_bid
+                did_bid = True
 
-        # Fill côté ask : l'agent vend
-        if self.inventory - q_ask >= self.inv_min:
-            if self.rng.random() < p_ask_fill:
+            elif (
+                u < p_bid_fill + p_ask_fill
+                and self.inventory - q_ask >= self.inv_min
+            ):
                 self.inventory -= q_ask
                 self.cash += q_ask * p_ask
                 self.nb_trades += 1
                 trade_sign -= q_ask
+                did_ask = True
+
+        elif fill_mode in ("independent", "hawkes"):
+            if (
+                self.inventory + q_bid <= self.inv_max
+                and self.rng.random() < p_bid_fill
+            ):
+                self.inventory += q_bid
+                self.cash -= q_bid * p_bid
+                self.nb_trades += 1
+                trade_sign += q_bid
+                did_bid = True
+
+            if (
+                self.inventory - q_ask >= self.inv_min
+                and self.rng.random() < p_ask_fill
+            ):
+                self.inventory -= q_ask
+                self.cash += q_ask * p_ask
+                self.nb_trades += 1
+                trade_sign -= q_ask
+                did_ask = True
+
+        else:
+            raise ValueError(f"Unknown fill_mode: {fill_mode}")
 
         # Avance temporelle
         self.t += 1
@@ -293,7 +431,8 @@ class MMSimulator :
         self.prev_mtm = mtm
 
         return self._state(), float(reward), done
-        
+    
+
     def _parse_action(self, action):
         """
         prends l'action et la sépare de manière a pouvoir l'utiliser 

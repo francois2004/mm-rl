@@ -1,5 +1,5 @@
 import numpy as np
-from src.env_toy_mm import MMSimulator
+from src.envs.env_toy_mm import MMSimulator
 from src.utils.discretisation import state_index
 
 
@@ -55,3 +55,4 @@ def evaluate_policy(agent, n_episodes=500, T_max=200, greedy=True):
         "mean_mtm_final": np.mean(mtm_finals),
         "mean_penalty": np.mean(penalties)
     }
+
