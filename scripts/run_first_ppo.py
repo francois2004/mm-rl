@@ -117,9 +117,9 @@ def main():
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Fichier introuvable: {csv_path}")
 
-    fill_modes = ["exclusive", "independent", "hawkes"]
+    fill_modes = [ "hawkes"]
 
-    base_out_dir = "logs/fill_mode_comparison"
+    base_out_dir = "logs/nouvel_inventaire"
     os.makedirs(base_out_dir, exist_ok=True)
 
     for fill_mode in fill_modes:

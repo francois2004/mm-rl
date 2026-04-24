@@ -25,8 +25,9 @@ class ActorNet(nn.Module) :
         action_dim: int = 1,
         delta_min: float = 0.0,
         delta_max: float = 0.05,
-        log_std_min: float = -5.0,
-        log_std_max: float = 2.0,
+        log_std_min: float = -2.5,
+        log_std_max: float = -1.2,
+        mu_scale : float = 1.,
         q_min = .0, 
         q_max = 10.
     ):
@@ -47,8 +48,10 @@ class ActorNet(nn.Module) :
         self.delta_max = float(delta_max)
         self.log_std_min = float(log_std_min)
         self.log_std_max = float(log_std_max)
+        self.mu_scale = float(mu_scale)
         self.q_min = q_min
         self.q_max = q_max
+
 
         layers = [nn.Linear(state_dim, hidden_size), nn.ReLU()]
         for _ in range(n_layers - 1):
@@ -67,7 +70,10 @@ class ActorNet(nn.Module) :
             log_std : log ecart_type, tronqué pour stabilité
         """
         h = self.backbone(s)
-        mu = self.mu_head(h)
+
+        mu_raw = self.mu_head(h)
+        mu = self.mu_scale * torch.tanh(mu_raw)
+
         log_std = self.log_std_head(h)
         log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
         return mu, log_std

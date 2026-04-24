@@ -45,7 +45,9 @@ class MMSimulator :
     csv_path,
     seed=42,
     p_fill_base=0.30,
-    eta_inv=1e-5,
+    eta_inv=1e-4,
+    eta_inv_abs = 1e-3,
+    eta_terminal = 5e-3,
     inv_max=50,
     inv_min=-50,
     phi_as=0.02,
@@ -91,15 +93,14 @@ class MMSimulator :
         for col in self.state_columns:
             if col not in self.data.columns:
                 raise ValueError(f"Missing column in data: {col}")
-
-
-
-
+            
         self.rng = np.random.default_rng(seed)
 
     # paramètres de trading
         self.p_fill_base = p_fill_base
         self.eta_inv = eta_inv
+        self.eta_inv_abs = eta_inv_abs
+        self.eta_terminal = eta_terminal
         self.inv_max = inv_max
         self.inv_min = inv_min
         self.phi_as = phi_as
@@ -193,21 +194,6 @@ class MMSimulator :
     def _compute_hawkes_fill_probs(self, delta_bid, delta_ask, q_bid, q_ask, row, k = 10): 
         """
         Probabilités de fill bid / ask basées sur des intensités de Hawkes discrétisées.
-
-        Nécessite d'initialiser dans __init__ ou reset :
-
-            self.lambda_bid
-            self.lambda_ask
-
-        Paramètres conseillés à stocker aussi :
-
-            self.hawkes_mu_bid
-            self.hawkes_mu_ask
-            self.hawkes_beta
-            self.hawkes_alpha_bb
-           self.hawkes_alpha_ba
-            self.hawkes_alpha_aa
-            self.hawkes_alpha_ab
 
         Returns
         -------
@@ -421,11 +407,18 @@ class MMSimulator :
 
         # Reward mark-to-market
         mtm = self.cash + self.inventory * self.mid
-        reward = mtm - self.prev_mtm
+        dmtm = mtm - self.prev_mtm
 
-        inv_penalty = self.eta_inv * self.inventory**2
-        reward -= inv_penalty
-        self.penalty_sum += inv_penalty
+        running_inv_penalty = self.eta_inv * self.inventory**2 + self.eta_inv_abs * np.abs(self.inventory)
+        reward = dmtm -  running_inv_penalty
+        
+        terminal_inv_penalty = 0
+        if done: 
+            terminal_inv_penalty = self.eta_terminal * (self.inventory**2)
+            reward -= terminal_inv_penalty
+
+        self.penalty_sum += running_inv_penalty + terminal_inv_penalty
+        
 
         self.inventory_path.append(self.inventory)
         self.prev_mtm = mtm

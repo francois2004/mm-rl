@@ -213,8 +213,6 @@ class Loss :
         gae[-1] = delta[-1]
         for i in reversed(range(len(gae)-1)): 
             gae[i] = delta[i] + gamma*lam*(1-dones[i])*gae[i+1]
-        ### Normalisation
-        gae = (gae - gae.mean())/(gae.std()+1e-12)
         return gae
     
     @staticmethod

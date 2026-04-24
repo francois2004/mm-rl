@@ -38,7 +38,7 @@ def collect_trajectory(env : MMSimulator, model : ActorNet, device = device, res
         state = env.reset_random(max_steps)
     else : 
         state = env.reset()
-    state = env._state()
+
     done = False
 
     states = []
@@ -238,9 +238,9 @@ def train_one_episode_ppo(
     device,
     gamma,
     lam=0.85,
-    n_epochs_actor=10,
-    n_epochs_critic=20,
-    batch_size=256,
+    n_epochs_actor=5,
+    n_epochs_critic=10,
+    batch_size=32,
     random_reset=True,
     max_steps=200,
     verbose=False
@@ -307,7 +307,7 @@ def train_one_episode_ppo(
         n_epochs=n_epochs_actor,
         batch_size=batch_size,
         eps_clip=0.25,
-        entropy_coef=1.2e-3,
+        entropy_coef=.01,
         verbose=verbose
     )
 
@@ -523,6 +523,7 @@ def fit_actor_ppo(
                 entropy_coef=entropy_coef
             )
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             epoch_losses.append(loss.item())
         mean_loss = float(np.mean(epoch_losses))
@@ -573,6 +574,7 @@ def fit_critic_ppo(
 
             loss = Loss.critic_loss_fn(model, batch_states, batch_returns)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             epoch_losses.append(loss.item())
